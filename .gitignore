@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+# personal backups never belong in the repo
+routine-tracker-*.json
+daily-log-*.csv
+lifting-log-*.csv
