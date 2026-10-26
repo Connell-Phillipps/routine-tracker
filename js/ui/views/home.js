@@ -1,13 +1,15 @@
 import { ACTIVITIES, ACTIVITY_LABELS, PHASE_LABELS, WORKOUTS } from '../../config/program.js';
 import { REQ_LABELS, STATS } from '../../config/game.js';
 import { phaseInfo, plannedSessions, scheduleFor, workoutForDate } from '../../engine/calendar.js';
+import { upcomingSession } from '../../engine/coach.js';
 import { choresForDate, environmentState } from '../../engine/environment.js';
 import { computeGame } from '../../engine/game.js';
 import { HABITS, HABIT_LABELS, deriveDay, emptyDay, liftDateSet } from '../../engine/metrics.js';
 import { diffDays, fmtDate, todayISO } from '../../util/dates.js';
-import { creatureArt, environmentArt, playEvolution } from '../art.js';
-import { ring, xpBar } from '../charts.js';
+import { creatureArt, playEvolution } from '../art.js';
+import { ring } from '../charts.js';
 import { esc, fmtNum, on } from '../dom.js';
+import { isNight, sceneHTML, startScene } from '../scene.js';
 
 const BACKUP_REMINDER_DAYS = 7;
 
@@ -50,6 +52,25 @@ function activityButtons(day, derived, date) {
     <details class="more"><summary>Other activities</summary><div class="ticks">${others.map(btn).join('')}</div></details>`;
 }
 
+/** What the creature says when tapped: the most useful nudges first. */
+function tipLines(state, today, day, derived, env, game, night) {
+  const t = state.settings.targets;
+  const lines = [];
+  if (night) lines.push(`Zzz… aiming for ${t.sleepH} h tonight.`);
+  const session = upcomingSession(state, today);
+  if (session && session.date === today && session.items.length) {
+    const first = session.items[0];
+    lines.push(`${WORKOUTS[session.workout].name} day! First up: ${first.exercise.name}, ${fmtNum(first.value, 2)} ${first.exercise.unit}.`);
+  }
+  if ((day.waterL || 0) < t.waterL) lines.push(`Water: ${fmtNum(t.waterL - (day.waterL || 0), 2)} L to go.`);
+  if ((day.proteinG || 0) < t.proteinG) lines.push(`Protein: ${Math.round(t.proteinG - (day.proteinG || 0))} g to go.`);
+  if ((day.pages || 0) < t.pages) lines.push(`${t.pages - (day.pages || 0)} more pages? I'll read with you.`);
+  if (env.mess) lines.push('The place is getting messy… one quick chore fixes it.');
+  lines.push(`${game.overall.span - game.overall.into} XP to level ${game.overall.level + 1}!`);
+  if (derived.habitsDone === HABITS.length) lines.unshift('Every habit ticked today. Great day!');
+  return lines;
+}
+
 export function render(ctx) {
   const { state, today } = ctx;
   const game = computeGame(state, today);
@@ -61,27 +82,25 @@ export function render(ctx) {
   const due = choresForDate(state.chores, state.choreLog, today);
   const dueOpen = due.filter((c) => !c.done).length;
   const t = state.settings.targets;
+  const night = isNight();
 
   const html = `
-    <header class="page-head">
-      <div><h1>Today</h1><p class="muted">${fmtDate(today)}</p></div>
+    <header class="page-head compact">
+      <div><h1>${night ? 'Tonight' : 'Today'}</h1><p class="muted small">${fmtDate(today)}</p></div>
       ${phasePill(state, today)}
     </header>
     ${backupBanner(state)}
 
-    <section class="card creature-card">
-      <div class="creature-art idle">${creatureArt(game.stage.stage, game.stage.name)}</div>
-      <div class="creature-info">
-        <h2>${esc(game.stage.name)} <small class="muted">form ${game.stage.stage}</small></h2>
-        <p class="level">Level ${game.overall.level}</p>
-        ${xpBar(game.overall.progress, 'linear-gradient(90deg,#ff7a3d,#3d8bff)')}
-        <p class="muted small">${game.overall.into} / ${game.overall.span} XP · ${esc(nextStageText(game))}</p>
-      </div>
+    ${sceneHTML({
+    stage: game.stage.stage, name: game.stage.name, level: game.overall.level, xpProgress: game.overall.progress,
+    envLevel: env.effectiveLevel, mess: env.mess, night,
+  })}
+    <div class="scene-foot">
       <div class="stat-chips">
-        ${Object.entries(STATS).map(([k, s]) => `<a class="chip" href="#stat/${k}" style="--c:${s.color}">
-          <b>${k}</b><span>Lv ${game.stats[k].level}</span></a>`).join('')}
+        ${Object.entries(STATS).map(([k, s]) => `<a class="chip" href="#stat/${k}" style="--c:${s.color}"><b>${k}</b><span>Lv ${game.stats[k].level}</span></a>`).join('')}
       </div>
-    </section>
+      <p class="muted small center">${esc(nextStageText(game))}</p>
+    </div>
 
     <section class="card">
       <div class="row-between">
@@ -114,14 +133,11 @@ export function render(ctx) {
       </div>
     </section>
 
-    <a class="card env-card" href="#habits">
-      <div class="env-art">${environmentArt(env.effectiveLevel, env.mess)}</div>
-      <div class="row-between">
-        <div><h2>Home · ${esc(env.base.name)}</h2>
-          <p class="muted small">${env.condition}${env.daysSince != null ? ` · last chore ${env.daysSince === 0 ? 'today' : `${env.daysSince}d ago`}` : ''}
-          ${env.next ? ` · ${env.points}/${env.next.minPoints} pts to next` : ''}</p></div>
-        <span class="pill">${state.chores.length ? `${dueOpen} due` : 'Add chores'}</span>
-      </div>
+    <a class="card row-between" href="#habits">
+      <div><h2>Home · ${esc(env.base.name)}</h2>
+        <p class="muted small">${env.condition}${env.daysSince != null ? ` · last chore ${env.daysSince === 0 ? 'today' : `${env.daysSince}d ago`}` : ''}
+        ${env.next ? ` · ${env.points}/${env.next.minPoints} pts to next` : ''}</p></div>
+      <span class="pill">${state.chores.length ? `${dueOpen} due` : 'Add chores'}</span>
     </a>`;
 
   function mount(root) {
@@ -135,6 +151,23 @@ export function render(ctx) {
     });
     on(root, '[data-bump]', 'click', (_e, el) => ctx.actions.bumpDay(today, el.dataset.bump, Number(el.dataset.amt)));
     on(root, '[data-flag]', 'click', (_e, el) => ctx.actions.saveDay(today, { [el.dataset.flag]: !day[el.dataset.flag] }));
+
+    const a = derived.activities;
+    startScene(root, {
+      envLevel: env.effectiveLevel,
+      night,
+      onNightChange: ctx.refresh,
+      lines: tipLines(state, today, day, derived, env, game, night),
+      today: {
+        lift: a.lift || !!workout, yoga: a.yoga, run: a.run, swim: a.swim,
+        read: (day.pages || 0) > 0, journal: !!day.journal, drink: (day.waterL || 0) > 0,
+        eat: state.food.some((f) => f.date === today) || (day.proteinG || 0) > 0,
+        mess: env.mess, lowSleep: day.sleepH != null && day.sleepH < t.sleepH,
+      },
+      awakeArt: creatureArt(game.stage.stage, game.stage.name),
+      sleepingArt: creatureArt(game.stage.stage, game.stage.name, { sleeping: true }),
+    });
+
     if (game.stage.stage > (state.settings.seenStage || 1)) {
       playEvolution(game.stage.name);
       ctx.actions.saveSettings({ seenStage: game.stage.stage }).catch((err) => console.error(err));

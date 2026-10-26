@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Art preview</title>
+  <link rel="stylesheet" href="../css/app.css">
+  <style>
+    body { padding: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+    figure { margin: 0; }
+    figcaption { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    .critter { left: 50%; top: 86%; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <h1>Rooms and forms</h1>
+  <p class="muted">Room level N with creature form N; the last row shows untidy, messy and night.</p>
+  <div class="grid" id="grid"></div>
+  <script type="module">
+    import { roomArt } from '../js/ui/room.js';
+    import { creatureSVG } from '../js/ui/art.js';
+    const HEAD = { 1: 68, 2: 72, 3: 76, 4: 84, 5: 88 };
+    const cell = (level, stage, mess, night, label) => `<figure><div class="scene">${roomArt(level, mess, night)}
+      <span class="critter" style="--s:1;--head:${HEAD[stage]}%"><span class="nametag"><b>Form ${stage}</b> · Lv ${stage * 4}<i><em style="width:40%"></em></i></span>
+      <span class="body"><span class="bob">${creatureSVG(stage, { sleeping: night })}</span></span></span></div>
+      <figcaption>${label}</figcaption></figure>`;
+    const cells = [1, 2, 3, 4, 5].map((n) => cell(n, n, 0, false, `Room level ${n}, form ${n}`));
+    cells.push(cell(3, 2, 1, false, 'Untidy (no chores for 7+ days)'), cell(3, 2, 2, false, 'Messy (14+ days)'), cell(5, 5, 0, true, 'Night: asleep'));
+    document.getElementById('grid').innerHTML = cells.join('');
+  </script>
+</body>
+</html>

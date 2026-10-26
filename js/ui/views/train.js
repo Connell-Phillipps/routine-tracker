@@ -1,9 +1,9 @@
-import { FEELS, FEEL_LABELS, PHASE_LABELS, TESTS, WORKOUTS } from '../../config/program.js';
+import { FEELS, FEEL_LABELS, PHASE_LABELS, TESTS, WARMUP, WORKOUTS } from '../../config/program.js';
 import { nextWorkoutDate, workoutForDate } from '../../engine/calendar.js';
 import { targetFor, workoutExercises } from '../../engine/coach.js';
 import { emptyDay, liftsByExercise } from '../../engine/metrics.js';
 import { liftPace, testPace } from '../../engine/pace.js';
-import { BASIS_LABELS } from '../../engine/progression.js';
+import { BASIS_LABELS, parseReps, progressionModel } from '../../engine/progression.js';
 import { fmtDate, fmtShort, isISODate } from '../../util/dates.js';
 import { lineChart } from '../charts.js';
 import { confirmSheet, esc, fmtNum, on, readNumber, sheet } from '../dom.js';
@@ -26,43 +26,48 @@ function entryLine(e, ex) {
   </div>`;
 }
 
-function exerciseCard(state, ex, date, byEx) {
+function exerciseCard(state, ex, date, byEx, position, total) {
   const entries = byEx.get(ex.id) || [];
   const todays = entries.filter((e) => e.date === date);
   const t = targetFor(state, ex, date, byEx);
   const basis = t.override ? `coach plan${t.override.note ? `: ${esc(t.override.note)}` : ''}` : BASIS_LABELS[t.rules.basis];
-  const last = t.last ? `Last: ${fmtNum(t.last.value, 2)} (${FEEL_LABELS[t.last.feel || 'good']}) on ${fmtShort(t.last.date)}` : 'First session';
+  const lastReps = t.last?.reps ? ` × ${esc(t.last.reps)}` : '';
+  const last = t.last ? `Last: ${fmtNum(t.last.value, 2)}${lastReps} (${FEEL_LABELS[t.last.feel || 'good']}) on ${fmtShort(t.last.date)}` : 'First session';
   let body;
   if (todays.length) {
     const nextDate = nextWorkoutDate(date, ex.workout);
     const next = nextDate ? targetFor(state, ex, nextDate, byEx) : null;
     body = `${todays.map((e) => entryLine(e, ex)).join('')}
-      ${next ? `<p class="next">Next session ${fmtShort(nextDate)} (${PHASE_LABELS[next.phase]}): <b>${fmtNum(next.value, 2)} ${esc(ex.unit)}</b> · ${esc(next.setsReps)}</p>` : ''}
-      <button class="btn sm ghost" data-another="${ex.id}">Log another entry</button>`;
+      ${next ? `<p class="next">Next session ${fmtShort(nextDate)} (${PHASE_LABELS[next.phase]}): <b>${fmtNum(next.value, 2)} ${esc(ex.unit)}</b> · ${esc(next.setsReps)}${next.aim ? ` · ${esc(next.aim)}` : ''}</p>` : ''}
+      <button class="btn sm ghost" data-another="${esc(ex.id)}">Log another entry</button>`;
   } else {
-    body = logForm(ex, t.value);
+    body = logForm(ex, t);
   }
   return `<article class="card ex-card ${ex.pair ? 'paired' : ''}" id="ex-${esc(ex.id)}">
     <div class="row-between">
-      <a class="ex-name" href="#exercise/${encodeURIComponent(ex.id)}">${ex.pair ? `<span class="pair">${esc(ex.pair)}</span>` : ''}${esc(ex.name)}</a>
-      <span class="muted small">${esc(ex.type)}</span>
+      <a class="ex-name" href="#exercise/${encodeURIComponent(ex.id)}"><span class="order-num">${position}</span>${ex.pair ? `<span class="pair">${esc(ex.pair)}</span>` : ''}${esc(ex.name)}</a>
+      <span class="muted small">${position}/${total}</span>
     </div>
-    <p class="target">Target <b>${fmtNum(t.value, 2)} ${esc(ex.unit)}</b> · ${esc(t.setsReps)}</p>
+    ${ex.orderNote ? `<p class="order-note small">${esc(ex.orderNote)}</p>` : ''}
+    <p class="target">Target <b>${fmtNum(t.value, 2)} ${esc(ex.unit)}</b> · ${esc(t.setsReps)}${t.aim ? ` · <b class="aim">${esc(t.aim)}</b>` : ''}</p>
     <p class="muted small">${basis} · ${last}</p>
     ${ex.notes ? `<p class="note small">${esc(ex.notes)}</p>` : ''}
     ${body}
   </article>`;
 }
 
-function logForm(ex, value) {
+function logForm(ex, target) {
+  const loaded = progressionModel(ex) === 'load';
   return `<form class="log-form" data-ex="${esc(ex.id)}">
     <div class="inline">
-      <label>Value (${esc(ex.unit)})<input name="value" type="number" inputmode="decimal" step="any" min="0" value="${value}" required></label>
-      <label>Sets<input name="sets" type="number" inputmode="numeric" min="0" step="1" placeholder="opt."></label>
-      <label>Reps<input name="reps" type="text" placeholder="e.g. 8,8,7"></label>
+      <label>${loaded ? 'Weight' : 'Result'} (${esc(ex.unit)})<input name="value" type="number" inputmode="decimal" step="any" min="0" value="${target.value}" required></label>
+      ${loaded
+    ? `<label class="grow2">Reps each set<input name="reps" type="text" inputmode="numeric" placeholder="${target.rules.reps ? `e.g. ${Array(target.rules.range?.sets || 3).fill(target.rules.reps).join(',')}` : 'e.g. 8,8,7'}"></label>`
+    : `<label>Sets<input name="sets" type="number" inputmode="numeric" min="0" step="1" placeholder="opt."></label>
+         <input name="reps" type="hidden" value="">`}
     </div>
     ${feelPicker(`feel-${ex.id}`, null)}
-    <p class="muted small">No feel picked counts as Good.</p>
+    <p class="muted small">${loaded ? 'Log reps so the app knows when to add weight. ' : ''}No feel picked counts as Good.</p>
     <button class="btn primary block" type="submit">Save</button>
   </form>`;
 }
@@ -109,7 +114,8 @@ export function render(ctx) {
   else {
     const list = workoutExercises(state, tab);
     content = list.length
-      ? list.map((ex) => exerciseCard(state, ex, date, byEx)).join('')
+      ? `<p class="banner info small"><b>Warm up:</b> ${esc(WARMUP)} Work through the lifts in this order.</p>
+        ${list.map((ex, i) => exerciseCard(state, ex, date, byEx, i + 1, list.length)).join('')}`
       : '<p class="muted center">No exercises. Add some in Settings → Exercise library.</p>';
     content += cardioSection(state, date);
   }
@@ -140,9 +146,12 @@ export function render(ctx) {
       const value = readNumber(form.elements.value, 'Value');
       if (value == null) throw new Error('Enter a value first.');
       const feel = form.querySelector('input[type=radio]:checked')?.value || null;
-      const sets = readNumber(form.elements.sets, 'Sets');
+      const repsText = form.elements.reps.value.trim();
+      const repsList = parseReps(repsText);
+      if (repsText && !repsList) throw new Error('Reps should look like 8,8,7 or 4x8.');
+      const sets = form.elements.sets ? readNumber(form.elements.sets, 'Sets') : repsList?.length ?? null;
       await ctx.actions.logLift({
-        date, exerciseId: form.dataset.ex, value, feel, sets, reps: form.elements.reps.value.trim() || null,
+        date, exerciseId: form.dataset.ex, value, feel, sets, reps: repsList ? repsList.join(',') : null,
       });
       ctx.toast('Saved');
     };
@@ -150,7 +159,7 @@ export function render(ctx) {
     on(root, '[data-another]', 'click', (_e, el) => {
       const ex = state.exercises.find((x) => x.id === el.dataset.another);
       const card = el.closest('.ex-card');
-      el.outerHTML = logForm(ex, targetFor(state, ex, date, byEx).value);
+      el.outerHTML = logForm(ex, targetFor(state, ex, date, byEx));
       on(card, '.log-form', 'submit', submitLog);
     });
     on(root, '[data-edit]', 'click', (_e, el) => editEntry(ctx, el.dataset.edit));

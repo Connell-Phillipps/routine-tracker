@@ -38,7 +38,19 @@ export async function loadState(db) {
     await db.bulkPut('exercises', structuredClone(SEED_EXERCISES));
     await db.put('kv', { key: 'seeded', value: true });
   }
+  await backfillExercises(db);
   return toState(await db.dumpAll());
+}
+
+/** Adds fields introduced in later versions (region, orderNote) to seeded exercises, never overwriting edits. */
+async function backfillExercises(db) {
+  const seeds = new Map(SEED_EXERCISES.map((e) => [e.id, e]));
+  const current = await db.getAll('exercises');
+  const updated = current
+    .filter((e) => seeds.has(e.id) && Object.keys(seeds.get(e.id)).some((k) => !(k in e)))
+    .map((e) => ({ ...structuredClone(seeds.get(e.id)), ...e }));
+  const custom = current.filter((e) => !seeds.has(e.id) && !('region' in e)).map((e) => ({ ...e, region: e.workout === 'legs' ? 'lower' : 'upper', orderNote: '' }));
+  if (updated.length || custom.length) await db.bulkPut('exercises', [...updated, ...custom]);
 }
 
 const replaceById = (list, item) => {
@@ -123,6 +135,14 @@ export function createActions(db, state, onChange) {
     state.exercises = replaceById(state.exercises, next);
     changed('exercises');
     return next;
+  }
+
+  /** Saves several exercises in one transaction (used for reordering). */
+  async function saveExercises(list) {
+    await db.bulkPut('exercises', list);
+    const byId = new Map(list.map((e) => [e.id, e]));
+    state.exercises = state.exercises.map((e) => byId.get(e.id) || e);
+    changed('exercises');
   }
 
   async function logTest({ date, testId, value }) {
@@ -258,7 +278,7 @@ export function createActions(db, state, onChange) {
   }
 
   return {
-    saveSettings, saveDay, bumpDay, logLift, updateLift, deleteLift, saveExercise, logTest, deleteTest,
+    saveSettings, saveDay, bumpDay, logLift, updateLift, deleteLift, saveExercise, saveExercises, logTest, deleteTest,
     addFood, deleteFood, saveChore, toggleChore, acceptOverrides, clearOverride,
     exportJSON, markBackedUp, importJSON, importDays, importLifts, resetAll,
   };

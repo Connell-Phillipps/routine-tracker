@@ -100,18 +100,48 @@ Things you may want to tune without touching UI code:
 There is no Node on this PC, so the tests run in a browser:
 
 ```bash
-python -m http.server 8765
+python tools/serve.py
 ```
 
-Then open <http://localhost:8765/tests/index.html>. It should say `PASS: 43/43`.
+Then open <http://localhost:8765/tests/index.html>. It should say `PASS: 56/56`.
+<http://localhost:8765/tests/art-preview.html> shows every room level and creature form side by side.
+On localhost the offline cache is off so edits show straight away; add `?sw` to the address to test offline.
+
+## The home scene
+
+The Home tab is your creature's room. It wanders around, and its name and level float above its head.
+What it does reflects your day: it lifts on the mat after you train, reads at the shelf if you have read,
+sips water, stretches after yoga, and sleeps in bed from 10 pm to 6 am. It sighs at the mess when chores
+slip. Tap it for a tip, such as today's first lift or how much water is left. Furniture unlocks as the home levels up
+(bed, bookshelf and plant, lamp and beanbag, then a hearth and an aquarium).
 
 ## Rules the app follows
 
-- **Progression by feel:** Easy +2 steps, Good or blank +1 step, Hard repeat, Missed -10% rounded to the
-  step (and always at least one step lighter).
-- **Deload weeks:** target is 90% of the last non-deload working value, again at least one step lighter.
-  Deload sessions never move the working weight, so the week after a deload progresses from the last
-  normal session.
+- **Loaded lifts use double progression.** Log the weight and the reps for each set (e.g. `8,8,7,7`).
+  The app adds reps inside the phase's rep range first, and adds weight only when every set reaches the
+  top of the range. Then the reps reset to the bottom of the range. Adding reps works about as well as
+  adding weight ([Plotkin et al. 2022](https://peerj.com/articles/14142)).
+- **Feel means reps in reserve:** Easy = 3+ left, Good = 1-2 left, Hard = 0 left or a grind,
+  Missed = short of target. Training close to failure, but not to it, is enough
+  ([Refalo et al. 2023](https://openrepository.aut.ac.nz/bitstreams/9e3df52b-a8b3-4139-b172-feefd51e5334/download)).
+  - At the top of the range: Easy adds 2 steps, but only if that is no more than about 5% (upper body)
+    or 10% (lower body); otherwise it adds 1 step. Good adds 1 step. Hard repeats.
+  - Inside the range: same weight. Easy aims for 2 more reps, Good for 1 more, Hard for the same.
+  - Missed: 10% lighter, rounded to the step, and always at least one step down.
+  - If no reps are logged, the app uses feel alone with the same caps.
+- **Explosive work** (jumps, trap bar jumps, sprints) goes up at most 1 step at a time, because speed
+  and quality matter more than load. **Rep-count exercises** (push-ups, pull-ups) add reps by feel.
+- **Deload weeks:** 90% of your last normal working weight (at least one step lighter) with about half the
+  sets. Cutting volume is the method coaches agree on most
+  ([Bell et al. 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC10511399/)). The week after a deload
+  progresses from your last normal session.
+- **New phase (Build 6-8 reps → Strength 3-5):** the starting weight is recalculated from your estimated
+  1-rep max (Epley formula) and rounded down. For example, squat 185 × 8 → 200 lb for sets of 3-5.
+- **Exercise order:** explosive work first, then the heaviest compound lift, other compounds,
+  isolation, and core last. Lifts done early in a session get the most strength gain and quality volume
+  ([exercise order review](https://www.unm.edu/~lkravitz/Article%20folder/ExerciseOrderinRT.html)).
+  Each exercise shows its place and why. New exercises slot in by type. The library warns you if the
+  order looks wrong, and its arrows reorder exercises.
 - **Phases:** 10-week cycle from the start date (Mon 19 Oct 2026): 4 Build, Deload, 4 Strength, Deload.
 - **Paired days:** Wed/Thu and Sat/Sun share one session and count 0.5 each. Swim on Wed/Thu is paired
   too, so the week plans exactly 12 sessions (4 swims, 4 lifts, 1 run, 1 soccer, 2 yoga).

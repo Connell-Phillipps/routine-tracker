@@ -72,46 +72,71 @@ export const SETS_REPS = {
 };
 
 const ex = (id, workout, order, name, type, unit, start, step, extra = {}) => ({
-  id, workout, order, name, type, unit, start, step, notes: '', pair: null, max: null, archived: false, ...extra,
+  id, workout, order, name, type, unit, start, step, notes: '', pair: null, max: null, archived: false,
+  region: workout === 'legs' ? 'lower' : 'upper', orderNote: '', ...extra,
 });
 
+// Session order follows the usual evidence-based sequence: explosive work while fresh,
+// then the heaviest multi-joint lift, other compounds, isolation, core last. Lifts done
+// early in a session gain the most strength and get the most quality volume
+// (Simão et al. 2012, Sports Med 42:251; Nunes et al. 2021 meta-analysis).
 export const SEED_EXERCISES = [
-  ex('incline-db-press', 'push', 1, 'Incline Dumbbell Press', 'main', 'lb/DB', 50, 5),
-  ex('seated-db-shoulder-press', 'push', 2, 'Seated DB Shoulder Press', 'compound', 'lb/DB', 40, 5),
-  ex('weighted-dips', 'push', 3, 'Weighted Dips', 'compound', 'lb added', 10, 5),
-  ex('cable-fly', 'push', 4, 'Cable Fly (high to low)', 'isolation', 'lb/side', 25, 5),
-  ex('oh-cable-triceps', 'push', 5, 'Overhead Cable Triceps Extension', 'isolation', 'lb', 50, 5),
-  ex('db-around-the-world', 'push', 6, 'DB Around-the-World Raise', 'isolation', 'lb/DB', 10, 2.5),
-  ex('push-ups', 'push', 7, 'Push-ups (decline, deficit, diamond)', 'bodyweight', 'reps', 8, 1, { min: 1 }),
+  ex('incline-db-press', 'push', 1, 'Incline Dumbbell Press', 'main', 'lb/DB', 50, 5, { orderNote: 'Heaviest press first, while fresh.' }),
+  ex('seated-db-shoulder-press', 'push', 2, 'Seated DB Shoulder Press', 'compound', 'lb/DB', 40, 5, { orderNote: 'Second multi-joint press.' }),
+  ex('weighted-dips', 'push', 3, 'Weighted Dips', 'compound', 'lb added', 10, 5, { orderNote: 'Last compound press, before isolation.' }),
+  ex('cable-fly', 'push', 4, 'Cable Fly (high to low)', 'isolation', 'lb/side', 25, 5, { orderNote: 'Chest isolation after the presses.' }),
+  ex('db-around-the-world', 'push', 5, 'DB Around-the-World Raise', 'isolation', 'lb/DB', 10, 2.5, { orderNote: 'Light shoulder isolation.' }),
+  ex('oh-cable-triceps', 'push', 6, 'Overhead Cable Triceps Extension', 'isolation', 'lb', 50, 5, { orderNote: 'Triceps last: tiring them early would limit every press.' }),
+  ex('push-ups', 'push', 7, 'Push-ups (decline, deficit, diamond)', 'bodyweight', 'reps', 8, 1, { min: 1, orderNote: 'Finisher. Stop 1-2 reps short of failure.' }),
 
   ex('pull-ups', 'pull', 1, 'Pull-ups', 'bodyweight', 'reps', 5, 1, {
-    min: 1, notes: 'Switch unit to "lb added" once you reach 3 × 10.',
+    min: 1, notes: 'Switch unit to "lb added" once you reach 3 × 10.', orderNote: 'Hardest pull first, while fresh.',
   }),
-  ex('seated-cable-row', 'pull', 2, 'Seated Cable Row', 'compound', 'lb', 140, 10),
-  ex('lat-pulldown', 'pull', 3, 'Lat Pulldown', 'compound', 'lb', 120, 10),
-  ex('single-arm-db-row', 'pull', 4, 'Single-Arm DB Row', 'compound', 'lb/DB', 60, 5),
-  ex('face-pull', 'pull', 5, 'Face Pull (rope)', 'isolation', 'lb', 55, 5),
-  ex('cable-biceps-curl', 'pull', 6, 'Cable Biceps Curl', 'isolation', 'lb', 50, 5),
-  ex('incline-db-curl', 'pull', 7, 'Incline DB Curl', 'isolation', 'lb/DB', 15, 2.5),
+  ex('seated-cable-row', 'pull', 2, 'Seated Cable Row', 'compound', 'lb', 140, 10, { orderNote: 'Heavy horizontal pull.' }),
+  ex('lat-pulldown', 'pull', 3, 'Lat Pulldown', 'compound', 'lb', 120, 10, { orderNote: 'Vertical pull volume after pull-ups.' }),
+  ex('single-arm-db-row', 'pull', 4, 'Single-Arm DB Row', 'compound', 'lb/DB', 60, 5, { orderNote: 'One-arm compound, fixes side-to-side gaps.' }),
+  ex('face-pull', 'pull', 5, 'Face Pull (rope)', 'isolation', 'lb', 55, 5, { orderNote: 'Rear delts and shoulder health.' }),
+  ex('cable-biceps-curl', 'pull', 6, 'Cable Biceps Curl', 'isolation', 'lb', 50, 5, { orderNote: 'Arms last: grip and biceps help every pull above.' }),
+  ex('incline-db-curl', 'pull', 7, 'Incline DB Curl', 'isolation', 'lb/DB', 15, 2.5, { orderNote: 'Long-length biceps finisher.' }),
 
-  ex('pogo-jumps', 'legs', 1, 'Pogo Jumps', 'plyometric', 'contacts', 20, 5),
-  ex('trap-bar-jump', 'legs', 2, 'Trap Bar Jump', 'power', 'lb total', 95, 10),
-  ex('back-squat', 'legs', 3, 'Back Squat', 'main', 'lb', 185, 10, { pair: 'A1', notes: 'Pairs with Broad Jump.' }),
-  ex('broad-jump', 'legs', 4, 'Broad Jump', 'plyometric', 'in', 90, 2, { pair: 'A2' }),
+  ex('pogo-jumps', 'legs', 1, 'Pogo Jumps', 'plyometric', 'contacts', 20, 5, { orderNote: 'Low-level plyo: also warms up ankles and tendons.' }),
+  ex('trap-bar-jump', 'legs', 2, 'Trap Bar Jump', 'power', 'lb total', 95, 10, { orderNote: 'Power before strength: you are fastest while fresh.' }),
+  ex('back-squat', 'legs', 3, 'Back Squat', 'main', 'lb', 185, 10, {
+    pair: 'A1', notes: 'Pairs with Broad Jump.', orderNote: 'Heaviest lift of the day. Do 2-3 ramp-up sets first.',
+  }),
+  ex('broad-jump', 'legs', 4, 'Broad Jump', 'plyometric', 'in', 90, 2, {
+    pair: 'A2', orderNote: 'Contrast pair: jump about 3-4 min after each squat set.',
+  }),
   ex('bulgarian-split-squat', 'legs', 5, 'Bulgarian Split Squat', 'compound', 'lb total', 80, 10, {
-    pair: 'B1', notes: 'Pairs with Split Squat Jumps.',
+    pair: 'B1', notes: 'Pairs with Split Squat Jumps.', orderNote: 'Single-leg compound after the heavy squat.',
   }),
-  ex('split-squat-jumps', 'legs', 6, 'Split Squat Jumps', 'plyometric', 'reps/side', 6, 1, { pair: 'B2', min: 1 }),
-  ex('nordic-curl', 'legs', 7, 'Nordic Hamstring Curl', 'bodyweight', 'reps', 4, 1, { min: 1 }),
+  ex('split-squat-jumps', 'legs', 6, 'Split Squat Jumps', 'plyometric', 'reps/side', 6, 1, {
+    pair: 'B2', min: 1, orderNote: 'Contrast pair with the split squat.',
+  }),
+  ex('nordic-curl', 'legs', 7, 'Nordic Hamstring Curl', 'bodyweight', 'reps', 4, 1, { min: 1, orderNote: 'Hard eccentric work last: it causes the most soreness.' }),
 
-  ex('sprints-30m', 'support', 1, 'Sprints 30 m', 'sprint', 'reps', 6, 1, { min: 1, max: 10, notes: 'Do first. Cap at 10.' }),
-  ex('leg-extension', 'support', 2, 'Leg Extension', 'isolation', 'lb', 120, 10),
-  ex('machine-chest-fly', 'support', 3, 'Machine Chest Fly', 'isolation', 'lb', 115, 5),
-  ex('preacher-curl', 'support', 4, 'Preacher Curl (EZ bar)', 'isolation', 'lb', 50, 5),
-  ex('hammer-curl', 'support', 5, 'Hammer Curl', 'isolation', 'lb/DB', 30, 5),
-  ex('hanging-leg-raise', 'support', 6, 'Hanging Leg Raise', 'bodyweight', 'reps', 10, 1, { min: 1 }),
-  ex('cable-crunch', 'support', 7, 'Cable Crunch', 'isolation', 'lb', 60, 5),
+  ex('sprints-30m', 'support', 1, 'Sprints 30 m', 'sprint', 'reps', 6, 1, {
+    min: 1, max: 10, region: 'lower', notes: 'Cap at 10.', orderNote: 'Max speed first, fully fresh and warmed up.',
+  }),
+  ex('leg-extension', 'support', 2, 'Leg Extension', 'isolation', 'lb', 120, 10, { region: 'lower', orderNote: 'Quad isolation after sprints.' }),
+  ex('machine-chest-fly', 'support', 3, 'Machine Chest Fly', 'isolation', 'lb', 115, 5, { orderNote: 'Extra chest volume.' }),
+  ex('preacher-curl', 'support', 4, 'Preacher Curl (EZ bar)', 'isolation', 'lb', 50, 5, { orderNote: 'Heavier curl before the lighter one.' }),
+  ex('hammer-curl', 'support', 5, 'Hammer Curl', 'isolation', 'lb/DB', 30, 5, { orderNote: 'Forearms and brachialis.' }),
+  ex('hanging-leg-raise', 'support', 6, 'Hanging Leg Raise', 'bodyweight', 'reps', 10, 1, { min: 1, orderNote: 'Core last, so it never limits a heavier lift.' }),
+  ex('cable-crunch', 'support', 7, 'Cable Crunch', 'isolation', 'lb', 60, 5, { orderNote: 'Core finisher.' }),
 ];
+
+// Where a new exercise slots into a session by default (lower runs earlier).
+export const ORDER_TIERS = { sprint: 0, power: 0, plyometric: 0, main: 1, compound: 2, bodyweight: 3, isolation: 4 };
+export const ORDER_TIER_LABELS = {
+  0: 'explosive work (sprints, jumps, power) comes first, while fresh',
+  1: 'the heaviest multi-joint lift comes next',
+  2: 'other compound lifts come before isolation',
+  3: 'bodyweight work fits between compounds and isolation',
+  4: 'isolation and core come last',
+};
+
+export const WARMUP = '5-10 min easy cardio and mobility, then 2-3 lighter ramp-up sets before your first heavy lift. Ramp-up sets are not logged.';
 
 // Performance tests, every 4-5 weeks at the end of a deload.
 export const TESTS = [

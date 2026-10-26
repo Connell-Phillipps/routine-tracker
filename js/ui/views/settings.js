@@ -1,4 +1,4 @@
-import { EXERCISE_TYPES, PHASE_LABELS, WORKOUTS } from '../../config/program.js';
+import { EXERCISE_TYPES, ORDER_TIERS, ORDER_TIER_LABELS, PHASE_LABELS, WORKOUTS } from '../../config/program.js';
 import { phaseForDate } from '../../engine/calendar.js';
 import { dailyCSV, importDailyRows, importLiftRows, liftsCSV, parseCSV } from '../../data/backup.js';
 import { isISODate, todayISO } from '../../util/dates.js';
@@ -163,35 +163,111 @@ async function reportImport(summary, errors) {
 
 // ---------- exercise library ----------
 
+const sessionList = (state, workout) => state.exercises.filter((e) => !e.archived && e.workout === workout).sort((a, b) => a.order - b.order);
+
+/** Exercises that sit after lighter work but should come before it. Bodyweight and A2/B2 partners are flexible. */
+export function orderWarnings(list) {
+  const out = [];
+  let maxTier = -1;
+  let maxName = '';
+  for (const e of list) {
+    const tier = ORDER_TIERS[e.type];
+    if (tier == null || e.type === 'bodyweight' || /2$/.test(e.pair || '')) continue;
+    if (tier < maxTier) out.push(`${e.name} comes after ${maxName}. Usually ${ORDER_TIER_LABELS[tier]}.`);
+    if (tier > maxTier) { maxTier = tier; maxName = e.name; }
+  }
+  return out;
+}
+
+/** Saves orders 1..n for a session in one write, so moves and inserts never collide. */
+async function renumber(ctx, list) {
+  const changed = list.map((e, i) => ({ ...e, order: i + 1 })).filter((e, i) => list[i].order !== e.order);
+  if (changed.length) await ctx.actions.saveExercises(changed);
+}
+
+/** Groups a session into blocks: a superset pair (A1+A2) moves as one block. */
+export function orderBlocks(list) {
+  const blocks = [];
+  for (const e of list) {
+    const letter = (e.pair || '').replace(/\d+$/, '');
+    const last = blocks[blocks.length - 1];
+    if (letter && last?.letter === letter) last.items.push(e);
+    else blocks.push({ letter, items: [e] });
+  }
+  return blocks;
+}
+
+/** New session order after moving an exercise's block one place up (-1) or down (+1). */
+export function moveBlock(list, id, dir) {
+  const blocks = orderBlocks(list);
+  const i = blocks.findIndex((b) => b.items.some((e) => e.id === id));
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= blocks.length) return list;
+  const moved = [...blocks];
+  [moved[i], moved[j]] = [moved[j], moved[i]];
+  return moved.flatMap((b) => b.items);
+}
+
 export function renderLibrary(ctx) {
   const { state } = ctx;
-  const active = state.exercises.filter((e) => !e.archived);
   const archived = state.exercises.filter((e) => e.archived);
   const html = `
     <header class="page-head"><div><a href="#settings" class="back">‹ Settings</a><h1>Exercises</h1></div>
       <a class="btn sm primary" href="#library/new">Add</a></header>
-    ${Object.entries(WORKOUTS).map(([k, w]) => `<section class="card"><h2>${w.name} <small class="muted">${w.when}</small></h2>
-      ${active.filter((e) => e.workout === k).sort((a, b) => a.order - b.order).map((e) => `<a class="entry" href="#library/${encodeURIComponent(e.id)}">
-        <span>${e.pair ? `<span class="pair">${esc(e.pair)}</span>` : ''}${esc(e.name)}</span><span class="muted small">${esc(e.unit)} · +${e.step}</span></a>`).join('') || '<p class="muted">None</p>'}
-    </section>`).join('')}
+    <p class="muted small">Order matters: explosive work first, then the heaviest compound lift, other compounds, isolation, and core last. Use the arrows to reorder.</p>
+    ${Object.entries(WORKOUTS).map(([k, w]) => {
+    const list = sessionList(state, k);
+    const warnings = orderWarnings(list);
+    return `<section class="card"><h2>${w.name} <small class="muted">${w.when}</small></h2>
+      ${warnings.map((m) => `<p class="banner warn small">${esc(m)}</p>`).join('')}
+      ${list.map((e, i) => `<div class="entry lib-row">
+        <a href="#library/${encodeURIComponent(e.id)}"><span class="order-num">${i + 1}</span>${e.pair ? `<span class="pair">${esc(e.pair)}</span>` : ''}${esc(e.name)}
+          <span class="muted small">· ${esc(e.type)}</span></a>
+        <span class="move">
+          <button class="btn sm ghost" data-move="${esc(e.id)}" data-dir="-1" aria-label="Move ${esc(e.name)} up" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="btn sm ghost" data-move="${esc(e.id)}" data-dir="1" aria-label="Move ${esc(e.name)} down" ${i === list.length - 1 ? 'disabled' : ''}>↓</button>
+        </span></div>`).join('') || '<p class="muted">None</p>'}
+    </section>`;
+  }).join('')}
     ${archived.length ? `<section class="card"><h2>Removed</h2>${archived.map((e) => `<div class="entry"><span>${esc(e.name)}</span>
-      <button class="btn sm" data-restore="${e.id}">Restore</button></div>`).join('')}</section>` : ''}`;
+      <button class="btn sm" data-restore="${esc(e.id)}">Restore</button></div>`).join('')}</section>` : ''}`;
   return {
     html,
     mount(root) {
-      on(root, '[data-restore]', 'click', (_e, el) => {
+      on(root, '[data-restore]', 'click', async (_e, el) => {
         const ex = state.exercises.find((x) => x.id === el.dataset.restore);
-        return ctx.actions.saveExercise({ ...ex, archived: false });
+        await ctx.actions.saveExercise({ ...ex, archived: false, order: autoOrder(state, ex.workout, ex.type) });
+        await renumber(ctx, sessionList(state, ex.workout));
+      });
+      let moving = false; // a second tap while saving would read a half-saved order
+      on(root, '[data-move]', 'click', async (_e, el) => {
+        if (moving) return;
+        moving = true;
+        try {
+          const ex = state.exercises.find((x) => x.id === el.dataset.move);
+          await renumber(ctx, moveBlock(sessionList(state, ex.workout), ex.id, Number(el.dataset.dir)));
+        } finally {
+          moving = false;
+        }
       });
     },
   };
+}
+
+/** Position for a new exercise: after the last one in the session at the same or an earlier tier. */
+function autoOrder(state, workout, type) {
+  const list = sessionList(state, workout);
+  const tier = ORDER_TIERS[type] ?? 4;
+  let after = 0;
+  for (const e of list) if ((ORDER_TIERS[e.type] ?? 4) <= tier) after = e.order;
+  return after + 0.5;
 }
 
 export function renderExerciseEdit(ctx, id) {
   const { state } = ctx;
   const isNew = id === 'new';
   const ex = isNew
-    ? { id: '', name: '', workout: 'push', type: 'isolation', unit: 'lb', start: 20, step: 5, notes: '', pair: '', max: null, order: 99 }
+    ? { id: '', name: '', workout: 'push', type: 'isolation', unit: 'lb', start: 20, step: 5, notes: '', pair: '', max: null, order: null, region: 'upper', orderNote: '' }
     : state.exercises.find((x) => x.id === id);
   if (!ex) return { html: '<p class="muted center">Exercise not found.</p>' };
   const html = `
@@ -205,9 +281,14 @@ export function renderExerciseEdit(ctx, id) {
         <label>Step<input name="step" type="number" inputmode="decimal" min="0.1" step="any" value="${ex.step}"></label>
         <label>Start value<input name="start" type="number" inputmode="decimal" min="0" step="any" value="${ex.start}"></label>
         <label>Cap (optional)<input name="max" type="number" inputmode="decimal" min="0" step="any" value="${ex.max ?? ''}"></label>
-        <label>Order<input name="order" type="number" inputmode="numeric" min="0" step="1" value="${ex.order}"></label>
+        <label>Body region<select name="region">
+          <option value="upper" ${ex.region !== 'lower' ? 'selected' : ''}>Upper / core</option>
+          <option value="lower" ${ex.region === 'lower' ? 'selected' : ''}>Lower body</option></select></label>
         <label>Pair (e.g. A1)<input name="pair" type="text" maxlength="4" value="${esc(ex.pair ?? '')}"></label>
       </div>
+      <p class="muted small">${isNew ? 'It is placed in the session by type (explosive, heavy compound, compound, isolation). Reorder with the arrows in the library.' : 'Reorder with the arrows in the library.'}
+        Region sets the biggest jump allowed: about 5% upper body, 10% lower body.</p>
+      <label>Why it sits here (optional)<input name="orderNote" type="text" maxlength="100" value="${esc(ex.orderNote ?? '')}"></label>
       <label>Notes<textarea name="notes" rows="2">${esc(ex.notes ?? '')}</textarea></label>
       <button class="btn primary block" type="submit">Save</button>
       ${isNew ? '' : '<button class="btn danger block" type="button" id="archive">Remove from program</button>'}
@@ -226,13 +307,17 @@ export function renderExerciseEdit(ctx, id) {
         if (start == null) throw new Error('Enter a start value.');
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'exercise';
         const newId = state.exercises.some((x) => x.id === slug) ? `${slug}-${Date.now().toString(36)}` : slug;
+        const workout = f.workout.value;
+        const moved = isNew || workout !== ex.workout;
         const saved = await ctx.actions.saveExercise({
           ...ex,
           id: isNew ? newId : ex.id,
-          name, workout: f.workout.value, type: f.type.value, unit: f.unit.value.trim() || 'lb', step, start,
-          max: readNumber(f.max, 'Cap'), order: readNumber(f.order, 'Order') ?? 99, pair: f.pair.value.trim().toUpperCase() || null,
-          notes: f.notes.value.trim(),
+          name, workout, type: f.type.value, unit: f.unit.value.trim() || 'lb', step, start,
+          max: readNumber(f.max, 'Cap'), pair: f.pair.value.trim().toUpperCase() || null,
+          order: moved ? autoOrder(state, workout, f.type.value) : ex.order,
+          region: f.region.value, orderNote: f.orderNote.value.trim(), notes: f.notes.value.trim(),
         });
+        if (moved) await renumber(ctx, sessionList(state, workout));
         ctx.toast('Exercise saved');
         ctx.go(`#exercise/${encodeURIComponent(saved.id)}`);
       });

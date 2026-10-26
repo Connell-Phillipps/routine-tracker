@@ -11,11 +11,11 @@ function planCard(session) {
     <p class="muted small">${fmtDate(session.date)} · rules-based plan</p>
     <table class="plan">
       <thead><tr><th>Exercise</th><th>Target</th><th>Sets × reps</th></tr></thead>
-      <tbody>${session.items.map((i) => `<tr>
-        <td>${i.exercise.pair ? `<span class="pair">${esc(i.exercise.pair)}</span>` : ''}${esc(i.exercise.name)}
-          <div class="muted small">${i.override ? `Coach: ${esc(i.override.rationale || i.override.note || 'accepted plan')} <button class="link-btn" data-clear="${i.exercise.id}">use rules</button>` : esc(BASIS_LABELS[i.rules.basis])}</div></td>
+      <tbody>${session.items.map((i, n) => `<tr>
+        <td><span class="order-num">${n + 1}</span>${i.exercise.pair ? `<span class="pair">${esc(i.exercise.pair)}</span>` : ''}${esc(i.exercise.name)}
+          <div class="muted small">${i.override ? `Coach: ${esc(i.override.rationale || i.override.note || 'accepted plan')} <button class="link-btn" data-clear="${esc(i.exercise.id)}">use rules</button>` : esc(BASIS_LABELS[i.rules.basis])}</div></td>
         <td><b>${fmtNum(i.value, 2)}</b> <span class="muted small">${esc(i.exercise.unit)}</span>${i.override && i.override.value !== i.rules.value ? `<div class="muted small">rules ${fmtNum(i.rules.value, 2)}</div>` : ''}</td>
-        <td class="small">${esc(i.setsReps)}</td></tr>`).join('')}</tbody>
+        <td class="small">${esc(i.setsReps)}${i.aim ? `<div class="aim">${esc(i.aim)}</div>` : ''}</td></tr>`).join('')}</tbody>
     </table>
   </section>`;
 }

@@ -2,7 +2,8 @@ import { test, eq, ok, throws } from './harness.js';
 import { DEFAULT_SETTINGS, SEED_EXERCISES } from '../js/config/program.js';
 import { addDays, dateRange, diffDays, dow, weekStart } from '../js/util/dates.js';
 import { nextWorkoutDate, phaseForDate, phaseInfo, plannedSessions, weekIndex, workoutForDate } from '../js/engine/calendar.js';
-import { deloadValue, nextTarget, progressValue, setsReps } from '../js/engine/progression.js';
+import { deloadValue, nextTarget, parseReps, progressValue, repRange, setsReps } from '../js/engine/progression.js';
+import { moveBlock, orderWarnings } from '../js/ui/views/settings.js';
 import { liftPace, longRunInfo } from '../js/engine/pace.js';
 import { consistency, deriveDay, emptyDay, weekSessions } from '../js/engine/metrics.js';
 import { extractJson, parseCoachReply, parseFoodReply, recoveryFlags, targetFor, upcomingSession } from '../js/engine/coach.js';
@@ -116,7 +117,7 @@ test('nextTarget: start value, then progression from history', () => {
   const ex = exById['incline-db-press'];
   eq(nextTarget(ex, [], 'build').value, 50);
   eq(nextTarget(ex, [], 'deload').value, 45);
-  eq(nextTarget(ex, [lift('2026-10-20', ex.id, 50, 'easy')], 'build').value, 60);
+  eq(nextTarget(ex, [lift('2026-10-20', ex.id, 50, 'easy')], 'build').value, 55, 'Easy +2 steps would be +20%, over the 5% upper cap');
 });
 
 test('nextTarget: deload weeks use 90% and never move the working weight', () => {
@@ -124,7 +125,95 @@ test('nextTarget: deload weeks use 90% and never move the working weight', () =>
   const history = [lift('2026-11-10', ex.id, 50, 'good'), lift('2026-11-17', ex.id, 45, 'easy')];
   eq(history[1].phase, 'deload');
   eq(nextTarget(ex, history.slice(0, 1), 'deload').value, 45, 'in deload: 90% of 50');
-  eq(nextTarget(ex, history, 'strength').value, 55, 'after deload: progress from the 50 Good, not the 45');
+  eq(nextTarget(ex, history, 'build').value, 55, 'after deload: progress from the 50 Good, not the 45');
+});
+
+const withReps = (entry, reps) => ({ ...entry, reps });
+
+test('double progression: add reps inside the range, then load at the top', () => {
+  const ex = exById['incline-db-press']; // main: build 4 x 6-8
+  const at = (reps, feel) => nextTarget(ex, [withReps(lift('2026-10-20', ex.id, 50, feel), reps)], 'build');
+  eq([at('8,8,8,8', 'good').value, at('8,8,8,8', 'good').reps, at('8,8,8,8', 'good').basis], [55, 6, 'load'], 'all sets at 8: +1 step, back to 6 reps');
+  eq([at('7,7,6,6', 'good').value, at('7,7,6,6', 'good').reps], [50, 7], 'worst set 6: same load, aim 7');
+  eq(at('7,7,6,6', 'easy').reps, 8, 'Easy: +2 reps');
+  eq([at('8,8,8,8', 'hard').value, at('8,8,8,8', 'hard').basis], [50, 'consolidate'], 'top of range but a grind: repeat');
+  eq([at('5,5,4', 'good').value, at('5,5,4', 'good').reps], [50, 6], 'below the range: hold, aim for the bottom');
+  eq(at('6,5,4', 'missed').value, 45, 'Missed: -10%');
+});
+
+test('load jumps stay inside the 5% upper / 10% lower body cap', () => {
+  const squat = exById['back-squat']; // lower, step 10
+  const top = (ex, value, reps = '8,8,8,8') => nextTarget(ex, [withReps(lift('2026-10-21', ex.id, value, 'easy'), reps)], 'build').value;
+  eq(top(squat, 185), 195, '+20 would be 10.8%');
+  eq(top(squat, 300), 320, '+20 is 6.7%');
+  eq(top(exById['seated-db-shoulder-press'], 40, '10,10,10'), 45, 'upper: +1 step only');
+  eq(top(exById['seated-db-shoulder-press'], 40, '9,9,8'), 40, 'compound 8-10: not at the top yet');
+});
+
+test('phase change re-bases load from estimated 1RM (Epley), rounded down', () => {
+  const squat = exById['back-squat'];
+  const t = nextTarget(squat, [withReps(lift('2026-11-11', squat.id, 185, 'good'), '8,8,8,8')], 'strength');
+  eq([t.value, t.reps, t.basis], [200, 3, 'phase'], '185 x 8 = 234 e1RM -> 200 for sets of 3-5');
+  const back = nextTarget(squat, [withReps(lift('2026-12-16', squat.id, 200, 'good'), '5,5,5,5,5')], 'build');
+  eq(back.value, 180, '200 x 5 = 233 e1RM -> 180 for sets of 6-8');
+});
+
+test('phase change never adds load without evidence', () => {
+  const ex = exById['incline-db-press'];
+  const at = (feel, reps, value = 100) => nextTarget(ex, [withReps(lift('2026-11-10', ex.id, value, feel), reps)], 'strength').value;
+  eq(at('missed', null), 90, 'Missed: -10%, not a re-based jump');
+  eq(at('hard', '8,8,8,8'), 100, 'Hard: capped at the old load');
+  eq(at('good', null), 100, 'no reps logged: capped at the old load');
+  eq(at('good', '8,8,8,8'), 105, '100 x 8 = 126.7 e1RM -> 108.6 -> 105');
+  const curl = exById['incline-db-curl']; // isolation, step 2.5
+  eq(nextTarget(curl, [withReps(lift('2026-12-16', curl.id, 2.5, 'good'), '8,8,8')], 'build').value, 2.5, 'too light to re-base: keep it, never 0');
+});
+
+test('double progression: fewer sets than planned never adds load', () => {
+  const ex = exById['incline-db-press'];
+  const t = nextTarget(ex, [withReps(lift('2026-10-20', ex.id, 50, 'easy'), '8,8')], 'build');
+  eq([t.value, t.basis], [50, 'sets']);
+});
+
+test('library: moving keeps superset pairs together', () => {
+  const legs = SEED_EXERCISES.filter((e) => e.workout === 'legs').sort((a, b) => a.order - b.order);
+  const ids = (list) => list.map((e) => e.id);
+  const up = moveBlock(legs, 'bulgarian-split-squat', -1);
+  eq(ids(up).slice(2, 6), ['bulgarian-split-squat', 'split-squat-jumps', 'back-squat', 'broad-jump'], 'B pair swaps with A pair as blocks');
+  eq(ids(moveBlock(legs, 'pogo-jumps', -1)), ids(legs), 'top item cannot move up');
+});
+
+test('explosive and rep-count exercises', () => {
+  const trap = exById['trap-bar-jump'];
+  eq(nextTarget(trap, [lift('2026-10-21', trap.id, 95, 'easy')], 'build').value, 105, 'power: one step max');
+  const pogo = exById['pogo-jumps'];
+  eq(nextTarget(pogo, [lift('2026-10-21', pogo.id, 20, 'easy')], 'build').value, 25, 'plyo: one step max');
+  const pushups = exById['push-ups'];
+  eq(nextTarget(pushups, [lift('2026-10-20', pushups.id, 8, 'easy')], 'build').value, 10, 'reps: Easy +2');
+  eq(nextTarget(pushups, [lift('2026-10-20', pushups.id, 8, 'easy')], 'build').reps, null);
+});
+
+test('parseReps reads lists and sets x reps', () => {
+  eq(parseReps('8,8,7'), [8, 8, 7]);
+  eq(parseReps('8 8 7 6'), [8, 8, 7, 6]);
+  eq(parseReps('4x8'), [8, 8, 8, 8]);
+  eq(parseReps('8/8/7'), [8, 8, 7]);
+  eq(parseReps(''), null);
+  eq(parseReps('abc'), null);
+  eq(parseReps('3x8,8,7'), null, 'mixed forms rejected');
+  eq(parseReps('12.5'), null, 'decimals rejected');
+  eq(parseReps('0x8'), null);
+  eq(repRange('main', 'build'), { sets: 4, lo: 6, hi: 8 });
+  eq(repRange('bodyweight', 'build'), null);
+});
+
+test('workout order: seeded sessions follow explosive > heavy > compound > isolation', () => {
+  for (const w of ['push', 'pull', 'legs', 'support']) {
+    const list = SEED_EXERCISES.filter((e) => e.workout === w).sort((a, b) => a.order - b.order);
+    eq(orderWarnings(list), [], w);
+  }
+  const bad = [exById['cable-fly'], exById['incline-db-press']];
+  eq(orderWarnings(bad).length, 1, 'main lift after isolation is flagged');
 });
 
 test('definition of done: Tuesday push session gives correct next targets', () => {
@@ -142,7 +231,7 @@ test('definition of done: Tuesday push session gives correct next targets', () =
   const next = nextWorkoutDate(tue, 'push');
   eq(next, '2026-10-27');
   const targets = logged.map((l) => targetFor(state, exById[l.exerciseId], next).value);
-  eq(targets, [60, 45, 10, 20, 55, 15, 9]);
+  eq(targets, [55, 45, 10, 20, 55, 12.5, 9], 'Easy is capped at one step when two would exceed 5% (upper body)');
   const sr = targetFor(state, exById['incline-db-press'], next).setsReps;
   eq(sr, '4 × 6-8', 'main lift in build');
 });

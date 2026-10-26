@@ -25,12 +25,15 @@ export function targetFor(state, exercise, date, byExercise = liftsByExercise(st
   const phase = phaseForDate(date, state.settings);
   const rules = nextTarget(exercise, history, phase);
   const override = activeOverride(state, exercise.id);
+  const repsAim = override ? null : rules.reps;
   return {
     value: override ? override.value : rules.value,
     rules,
     override,
     phase,
     setsReps: override?.sets ? `${override.sets} × ${override.reps ?? ''}`.trim() : setsReps(exercise.type, phase),
+    /** Per-set rep goal for loaded lifts, e.g. "aim 7 reps a set". Empty for other kinds. */
+    aim: repsAim ? `aim ${repsAim} reps a set` : '',
     last: history[history.length - 1] || null,
   };
 }
@@ -108,7 +111,7 @@ function recentLiftLines(state, exercises, perExercise = 4) {
   return exercises.map((ex) => {
     const entries = (byEx.get(ex.id) || []).slice(-perExercise);
     const hist = entries.length
-      ? entries.map((e) => `${e.date} ${e.value} ${e.feel || 'good'}${e.phase === 'deload' ? ' (deload)' : ''}`).join('; ')
+      ? entries.map((e) => `${e.date} ${e.value} ${e.feel || 'good'}${e.reps ? ` ${e.reps}` : ''}${e.phase === 'deload' ? ' (deload)' : ''}`).join('; ')
       : 'no entries yet';
     return `- ${ex.id} | ${ex.name} | ${ex.type} | unit ${ex.unit} | step ${ex.step} | ${hist}`;
   });
@@ -136,7 +139,7 @@ export function buildCoachPrompt(state, today) {
   const info = phaseInfo(today, state.settings);
   const exercises = session ? session.items.map((i) => i.exercise) : [];
   const planLines = session
-    ? session.items.map((i) => `- ${i.exercise.id}: ${i.rules.value} ${i.exercise.unit}, ${i.setsReps}`)
+    ? session.items.map((i, n) => `- ${n + 1}. ${i.exercise.id}: ${i.rules.value} ${i.exercise.unit}, ${i.setsReps}${i.aim ? ` (${i.aim})` : ''}`)
     : ['- no lift session in the next 7 days'];
   return [
     'You are my strength and conditioning coach. Review my training data and suggest my next lift session.',
@@ -145,10 +148,13 @@ export function buildCoachPrompt(state, today) {
     session ? `Next session: ${WORKOUTS[session.workout].name} on ${session.date} (${PHASE_LABELS[session.phase]} week).` : '',
     '',
     'My progression rules (follow them unless there is a clear reason not to, and say why):',
-    '- Easy (3+ reps left): +2 steps. Good or blank (1-2 left): +1 step. Hard (grind or 1-2 short): repeat. Missed: -10% rounded to the step.',
-    '- Deload weeks: 90% of working weight. 10-week cycle: 4 Build, Deload, 4 Strength, Deload.',
+    '- Loaded lifts use double progression: add reps within the phase rep range, add load only when every set hits the top of the range.',
+    '- Feel = reps in reserve: Easy 3+, Good 1-2, Hard 0 or a grind, Missed short. Easy may add 2 steps only if that is under 5% (upper) or 10% (lower body). Missed: -10%.',
+    '- Explosive work (plyo, power, sprint) adds 1 step at most. Rep-count exercises add reps by feel.',
+    '- Deload weeks: 90% load and about half the sets. New phase: load re-based from estimated 1RM (Epley).',
+    '- 10-week cycle: 4 Build, Deload, 4 Strength, Deload. Keep the exercise order: explosive, heavy compound, compound, isolation, core.',
     '',
-    'Recent lifts (id | name | type | unit | step | date value feel):',
+    'Recent lifts (id | name | type | unit | step | date value feel reps):',
     ...recentLiftLines(state, exercises),
     '',
     'Rules-based plan from my app:',

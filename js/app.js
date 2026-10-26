@@ -85,6 +85,8 @@ main.addEventListener('focusout', () => {
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
+  // While developing on localhost, cache-first would serve stale files. Add ?sw to test offline.
+  if (location.hostname === 'localhost' && !new URLSearchParams(location.search).has('sw')) return;
   navigator.serviceWorker.register('sw.js').then((reg) => {
     if (reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(reg.waiting);
     reg.addEventListener('updatefound', () => {
