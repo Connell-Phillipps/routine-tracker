@@ -73,6 +73,37 @@ To restore (new phone, or data cleared): **Settings → Restore from backup**, t
 Food photos work the same way from **Habits → Food → Copy photo prompt**: paste the prompt into Claude
 with your photo, paste the reply back, check the numbers, **Save meal**. Its protein is added to the day.
 
+## Import a plan file
+
+When Claude writes a training plan as a `.json` file saved in iCloud Drive, load it instead of pasting:
+
+1. **Coach → Import plan file**, then pick the file in Files.
+2. The same **Claude vs rules** comparison opens, with the block name, dates and notes above it.
+3. Tick the changes you want and tap **Accept ticked**. Accepted lifts work exactly like a pasted reply:
+   they set the target for the next session of each lift only.
+
+If the file is not JSON, has no `lifts` list, or names a lift the app does not know, the app says so and
+changes nothing for those lifts. Pasting a reply still works as before.
+
+## Plan file format
+
+The same JSON as a pasted coach reply. `block`, `start`, `end` (YYYY-MM-DD) and `notes` (text or a list
+of lines) are optional and only shown above the comparison. `exercise` is an exercise id or name from
+the app's library; `weight` is in that exercise's unit. `sets`, `reps`, `note` and `rationale` are optional.
+
+```json
+{
+  "block": "Strength block 2",
+  "start": "2026-11-23",
+  "end": "2026-12-20",
+  "notes": "Keep two reps in reserve on squats.",
+  "lifts": [
+    { "exercise": "back-squat", "weight": 190, "sets": 3, "reps": "3-5", "rationale": "Strength phase start." }
+  ],
+  "summary": "Heavier, lower reps for four weeks."
+}
+```
+
 ## Using your own creature or room art
 
 Drop PNG files into `assets/character/` (`stage-1.png` … `stage-5.png`) and `assets/environment/`
@@ -103,7 +134,7 @@ There is no Node on this PC, so the tests run in a browser:
 python tools/serve.py
 ```
 
-Then open <http://localhost:8765/tests/index.html>. It should say `PASS: 56/56`.
+Then open <http://localhost:8765/tests/index.html>. It should say `PASS: 62/62`.
 <http://localhost:8765/tests/art-preview.html> shows every room level and creature form side by side.
 On localhost the offline cache is off so edits show straight away; add `?sw` to the address to test offline.
 

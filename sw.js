@@ -1,6 +1,6 @@
 // Service worker: cache-first app shell so the app works with no signal.
 // tools/release.py rewrites CACHE_VERSION and SHELL; run it after changing any file.
-const CACHE_VERSION = '1.1.0';
+const CACHE_VERSION = '1.2.0';
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const ART_CACHE = 'art-v1'; // user art in assets/, kept across app versions
 

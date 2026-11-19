@@ -1,6 +1,6 @@
 // On-device rules coach (handover 8.1) and the "Ask Claude" copy/paste bridge (8.2).
 import { PHASE_LABELS, WORKOUTS } from '../config/program.js';
-import { addDays, dateRange, dayKey } from '../util/dates.js';
+import { addDays, dateRange, dayKey, isISODate } from '../util/dates.js';
 import { phaseForDate, phaseInfo, scheduleFor, workoutForDate } from './calendar.js';
 import { computeDashboard, liftsByExercise } from './metrics.js';
 import { nextTarget, setsReps } from './progression.js';
@@ -199,10 +199,29 @@ export function extractJson(text) {
 
 const toNumber = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
 
-/** Validates a coach reply against the exercise library. Returns { items, errors, summary }. */
+/**
+ * Optional plan-level fields a plan file may carry: block (name), start and end (YYYY-MM-DD),
+ * notes (text or a list of lines). Shown above the diff only. Null when none are present.
+ */
+function planInfo(data, errors) {
+  if (!['block', 'start', 'end', 'notes'].some((k) => data[k] != null)) return null;
+  const date = (k) => {
+    if (data[k] == null) return null;
+    if (isISODate(data[k])) return data[k];
+    errors.push(`Plan ${k} date "${data[k]}" is not YYYY-MM-DD; ignored.`);
+    return null;
+  };
+  const notes = Array.isArray(data.notes) ? data.notes.map(String).join('\n') : data.notes != null ? String(data.notes) : '';
+  return { block: data.block != null ? String(data.block) : '', start: date('start'), end: date('end'), notes };
+}
+
+/**
+ * Validates a coach reply or plan file against the exercise library.
+ * Returns { items, errors, summary, plan }; plan is null unless plan-level fields are present.
+ */
 export function parseCoachReply(text, state) {
   const data = extractJson(text);
-  if (!Array.isArray(data.lifts)) throw new Error('The reply has no "lifts" list.');
+  if (!Array.isArray(data.lifts)) throw new Error('No "lifts" list found. Expected Claude\'s coach JSON: {"lifts":[...]}.');
   const byKey = new Map();
   for (const ex of state.exercises) {
     byKey.set(ex.id.toLowerCase(), ex);
@@ -210,7 +229,9 @@ export function parseCoachReply(text, state) {
   }
   const items = [];
   const errors = [];
+  const plan = planInfo(data, errors);
   data.lifts.forEach((l, i) => {
+    if (!l || typeof l !== 'object' || Array.isArray(l)) { errors.push(`Item ${i + 1}: not a lift entry.`); return; }
     const key = String(l.exercise ?? l.id ?? l.name ?? '').trim().toLowerCase();
     const ex = byKey.get(key);
     const value = toNumber(l.weight ?? l.value);
@@ -227,7 +248,7 @@ export function parseCoachReply(text, state) {
     });
   });
   if (!items.length && !errors.length) errors.push('The "lifts" list is empty.');
-  return { items, errors, summary: data.summary ? String(data.summary) : '' };
+  return { items, errors, summary: data.summary ? String(data.summary) : '', plan };
 }
 
 export function parseFoodReply(text) {

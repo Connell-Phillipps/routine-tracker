@@ -1,8 +1,8 @@
 import { PHASE_LABELS, WORKOUTS } from '../../config/program.js';
 import { buildCoachPrompt, parseCoachReply, upcomingSession, weeklyReview } from '../../engine/coach.js';
 import { BASIS_LABELS } from '../../engine/progression.js';
-import { fmtDate } from '../../util/dates.js';
-import { copyText, esc, fmtNum, on, sheet } from '../dom.js';
+import { fmtDate, fmtShort } from '../../util/dates.js';
+import { copyText, esc, fmtNum, on, readFile, sheet } from '../dom.js';
 
 function planCard(session) {
   if (!session) return '<section class="card"><h2>Next session</h2><p class="muted">No lift planned in the next 7 days.</p></section>';
@@ -20,6 +20,19 @@ function planCard(session) {
   </section>`;
 }
 
+const MAX_PLAN_FILE_BYTES = 512 * 1024;
+
+/** Block name, dates and notes from a plan file, shown above the diff. Empty for a plain reply. */
+function planHead(plan) {
+  if (!plan) return '';
+  const dates = [plan.start, plan.end].filter(Boolean).map(fmtShort).join(' – ');
+  return `<div class="plan-head">
+    ${plan.block ? `<p><b>${esc(plan.block)}</b></p>` : ''}
+    ${dates ? `<p class="muted small">${esc(dates)}</p>` : ''}
+    ${plan.notes ? `<p class="small">${esc(plan.notes).replace(/\n/g, '<br>')}</p>` : ''}
+  </div>`;
+}
+
 function diffBody(parsed, session) {
   const rulesById = new Map((session?.items || []).map((i) => [i.exercise.id, i]));
   const rows = parsed.items.map((item, idx) => {
@@ -33,7 +46,7 @@ function diffBody(parsed, session) {
         ${item.rationale ? `<br><span class="muted small">${esc(item.rationale)}</span>` : ''}</span>
     </label>`;
   }).join('');
-  return `${parsed.summary ? `<p>${esc(parsed.summary)}</p>` : ''}
+  return `${planHead(parsed.plan)}${parsed.summary ? `<p>${esc(parsed.summary)}</p>` : ''}
     ${parsed.errors.length ? `<div class="banner warn">${parsed.errors.map(esc).join('<br>')}</div>` : ''}
     <p class="muted small">Ticked changes become your targets for the next session of each lift. Unticked lifts keep the rules plan.</p>
     ${rows || '<p class="muted">Nothing usable in the reply.</p>'}`;
@@ -61,6 +74,7 @@ export function render(ctx) {
       </ol>
       <textarea id="coach-reply" rows="5" placeholder='{"workout":"push","lifts":[...]}'></textarea>
       <button class="btn block" id="read-reply">Compare with rules plan</button>
+      <label class="file-btn btn">Import plan file<input type="file" accept=".json,application/json" id="import-plan" hidden></label>
       <p class="muted small">Nothing changes until you accept. Uses your Claude subscription; nothing is sent from this app.</p>
     </section>`;
 
@@ -70,8 +84,9 @@ export function render(ctx) {
       if (await copyText(prompt)) ctx.toast('Prompt copied. Paste it into Claude.');
       else await sheet({ title: 'Copy this prompt', body: `<textarea rows="12" readonly>${esc(prompt)}</textarea>` });
     });
-    on(root, '#read-reply', 'click', async () => {
-      const parsed = parseCoachReply(root.querySelector('#coach-reply').value, state);
+    // A pasted reply and an imported plan file both go through compareAndAccept.
+    async function compareAndAccept(text) {
+      const parsed = parseCoachReply(text, state);
       const picked = await sheet({
         title: 'Claude vs rules',
         body: diffBody(parsed, session),
@@ -86,6 +101,18 @@ export function render(ctx) {
       if (!picked?.length) { ctx.toast('No changes made.'); return; }
       await ctx.actions.acceptOverrides(picked);
       ctx.toast(`${picked.length} target${picked.length > 1 ? 's' : ''} updated from Claude.`);
+    }
+    on(root, '#read-reply', 'click', () => compareAndAccept(root.querySelector('#coach-reply').value));
+    on(root, '#import-plan', 'change', async (e) => {
+      const file = e.target.files?.[0];
+      if (file && file.size > MAX_PLAN_FILE_BYTES) {
+        e.target.value = '';
+        throw new Error(`${file.name} is too big to be a plan file.`);
+      }
+      const text = await readFile(e.target);
+      e.target.value = ''; // lets the same file be picked again
+      if (!text.trim()) throw new Error(`${file.name} is empty.`);
+      await compareAndAccept(text);
     });
     on(root, '[data-clear]', 'click', (_e, el) => ctx.actions.clearOverride(el.dataset.clear));
   }
